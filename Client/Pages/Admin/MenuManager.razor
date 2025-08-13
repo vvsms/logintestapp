@@ -1,0 +1,162 @@
+﻿@page "/admin/menu-manager"
+@inject IHttpClientFactory HttpFactory
+@inject NavigationManager Nav
+
+<h3>Menu Manager</h3>
+
+<button class="btn btn-sm btn-primary" @onclick="Load">Reload</button>
+<button class="btn btn-sm btn-success" @onclick="ShowCreate">Create</button>
+
+<table class="table mt-2">
+    <thead><tr><th>Title</th><th>Url</th><th>Roles</th><th>Policies</th><th>Visible</th><th>Order</th><th>Actions</th></tr></thead>
+    <tbody>
+        @foreach (var item in items)
+        {
+            <tr>
+                <td>@item.Title</td>
+                <td>@item.Url</td>
+                <td>@string.Join(", ", item.AllowedRoles)</td>
+                <td>@string.Join(", ", item.AllowedPolicies)</td>
+                <td>@item.IsVisible</td>
+                <td>@item.Order</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" @onclick="() => Edit(item)">Edit</button>
+                    <button class="btn btn-sm btn-danger" @onclick="() => Delete(item.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (showModal)
+{
+    <div class="modal show d-block" style="background: rgba(0,0,0,.5)">
+        <div class="modal-dialog">
+            <div class="modal-content p-3">
+                <h5>@modalTitle</h5>
+
+                <div class="mb-2">
+                    <input class="form-control" @bind="editing.Title" placeholder="Title" />
+                </div>
+                <div class="mb-2">
+                    <input class="form-control" @bind="editing.Url" placeholder="Url" />
+                </div>
+                <div class="mb-2">
+                    <label>Order</label>
+                    <input class="form-control" type="number" @bind="editing.Order" />
+                </div>
+                <div class="mb-2">
+                    <input type="checkbox" @bind="editing.IsVisible" /> Visible
+                </div>
+
+                <div>
+                    <h6>Roles</h6>
+                    @foreach (var r in allRoles)
+                    {
+                        <div><input type="checkbox" checked="@editing.AllowedRoles.Contains(r)" @onchange="e => ToggleRole(r, e)" /> @r</div>
+                    }
+                </div>
+
+                <div>
+                    <h6>Policies</h6>
+                    @foreach (var p in allPolicies)
+                    {
+                        <div><input type="checkbox" checked="@editing.AllowedPolicies.Contains(p)" @onchange="e => TogglePolicy(p, e)" /> @p</div>
+                    }
+                </div>
+
+                <div class="mt-2">
+                    <button class="btn btn-primary" @onclick="Save">Save</button>
+                    <button class="btn btn-secondary" @onclick="Close">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MenuItemDto> items = new();
+    private List<string> allRoles = new();
+    private List<string> allPolicies = new();
+    private bool showModal = false;
+    private string modalTitle = "Create";
+    private EditModel editing = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        await LoadRolesPolicies();
+    }
+
+    async Task Load()
+    {
+        var client = HttpFactory.CreateClient("ApiClient");
+        items = await client.GetFromJsonAsync<List<MenuItemDto>>() ?? new();
+    }
+
+    async Task LoadRolesPolicies()
+    {
+        try { allRoles = (await HttpFactory.CreateClient("ApiClient").GetFromJsonAsync<List<string>>("api/admin/roles")) ?? new(); }
+        catch { allRoles = new(); }
+        try { allPolicies = (await HttpFactory.CreateClient("ApiClient").GetFromJsonAsync<List<string>>("api/admin/policies")) ?? new(); }
+        catch { allPolicies = new(); }
+    }
+
+    void ShowCreate() { modalTitle = "Create"; editing = new EditModel(); showModal = true; }
+    void Edit(MenuItemDto dto)
+    {
+        modalTitle = "Edit";
+        editing = new EditModel
+        {
+            Id = dto.Id,
+            Title = dto.Title,
+            Url = dto.Url,
+            Order = dto.Order,
+            IsVisible = dto.IsVisible,
+            AllowedRoles = dto.AllowedRoles.ToList(),
+            AllowedPolicies = dto.AllowedPolicies.ToList()
+        };
+        showModal = true;
+    }
+    async Task Delete(int id)
+    {
+        var client = HttpFactory.CreateClient("ApiClient");
+        await client.DeleteAsync($"api/menu/{id}");
+        await Load();
+    }
+    void Close() => showModal = false;
+
+    async Task Save()
+    {
+        var client = HttpFactory.CreateClient("ApiClient");
+        var dto = new MenuItemDto(editing.Id, editing.Title, editing.Url, editing.AllowedRoles.ToArray(), editing.AllowedPolicies.ToArray(), editing.IsVisible, editing.Order);
+        if (editing.Id == 0) await client.PostAsJsonAsync("api/menu", dto);
+        else await client.PutAsJsonAsync($"api/menu/{editing.Id}", dto);
+        showModal = false;
+        await Load();
+    }
+
+    void ToggleRole(string role, ChangeEventArgs e)
+    {
+        var ok = (bool)e.Value!;
+        if (ok) { if (!editing.AllowedRoles.Contains(role)) editing.AllowedRoles.Add(role); }
+        else editing.AllowedRoles.Remove(role);
+    }
+    void TogglePolicy(string policy, ChangeEventArgs e)
+    {
+        var ok = (bool)e.Value!;
+        if (ok) { if (!editing.AllowedPolicies.Contains(policy)) editing.AllowedPolicies.Add(policy); }
+        else editing.AllowedPolicies.Remove(policy);
+    }
+
+    class EditModel
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = "";
+        public string Url { get; set; } = "/";
+        public int Order { get; set; }
+        public bool IsVisible { get; set; } = true;
+        public List<string> AllowedRoles { get; set; } = new();
+        public List<string> AllowedPolicies { get; set; } = new();
+    }
+}

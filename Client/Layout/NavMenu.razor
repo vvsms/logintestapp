@@ -1,0 +1,21 @@
+﻿@inject MenuService MenuService
+@implements IDisposable
+
+<nav>
+    <ul>
+        @foreach (var m in MenuService.Items)
+        {
+            <li><a href="@m.Url">@m.Title</a></li>
+        }
+    </ul>
+</nav>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        MenuService.OnChange += StateHasChanged;
+        await MenuService.LoadAsync();
+    }
+
+    public void Dispose() => MenuService.OnChange -= StateHasChanged;
+}
