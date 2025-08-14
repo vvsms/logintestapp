@@ -8,44 +8,32 @@ namespace Client.Services
     public class MenuService
     {
         private readonly IHttpClientFactory _httpFactory;
-        private readonly NavigationManager _nav;
         private HubConnection? _hub;
 
-        public List<MenuItemDto> Items { get; private set; } = new();
+        public event Action? MenuChanged;
 
-        public event Action? OnChange;
-
-        public MenuService(IHttpClientFactory httpFactory, NavigationManager nav)
+        public MenuService(IHttpClientFactory httpFactory)
         {
             _httpFactory = httpFactory;
-            _nav = nav;
+        }
 
+        public async Task<List<MenuItemDto>> GetMenuAsync()
+        {
+            var http = _httpFactory.CreateClient("authorized-api");
+            var items = await http.GetFromJsonAsync<List<MenuItemDto>>("api/menu");
+            return items ?? [];
+        }
+
+        public async Task ConnectHubAsync(string hubBase)
+        {
+            // hubBase e.g. the same origin
             _hub = new HubConnectionBuilder()
-                .WithUrl(_nav.ToAbsoluteUri("/hubs/menu"))
+                .WithUrl($"{hubBase}menuhub")
                 .WithAutomaticReconnect()
                 .Build();
 
-            _hub.On("MenuUpdated", async () =>
-            {
-                await LoadAsync();
-                OnChange?.Invoke();
-            });
-
-            _ = _hub.StartAsync();
-        }
-
-        public async Task LoadAsync()
-        {
-            var client = _httpFactory.CreateClient("ApiClient");
-            try
-            {
-                Items = await client.GetFromJsonAsync<List<MenuItemDto>>("api/menu") ?? new();
-            }
-            catch
-            {
-                Items = new List<MenuItemDto>();
-            }
-            OnChange?.Invoke();
+            _hub.On("MenuChanged", () => MenuChanged?.Invoke());
+            await _hub.StartAsync();
         }
     }
 }

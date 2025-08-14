@@ -1,16 +1,26 @@
 ﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+@inject Client.Services.MenuService MenuService
+@inject NavigationManager Nav
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+<ul>
+    @if (menu is not null)
+    {
+        foreach (var item in menu)
+        {
+            <li><a href="@item.Url">@item.Title</a></li>
+        }
+    }
+</ul>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+@Body
+
+@code {
+    private List<Shared.DTOs.MenuItemDto>? menu;
+
+    protected override async Task OnInitializedAsync()
+    {
+        MenuService.MenuChanged += async () => { menu = await MenuService.GetMenuAsync(); StateHasChanged(); };
+        await MenuService.ConnectHubAsync(Nav.BaseUri);
+        menu = await MenuService.GetMenuAsync();
+    }
+}

@@ -17,74 +17,74 @@ public class TokenService : ITokenService
 {
     private readonly IConfiguration _config;
     private readonly UserManager<ApplicationUser> _userManager;
-    private readonly ApplicationDbContext _context;
+    private readonly ApplicationDbContext _db;
 
-    public TokenService(IConfiguration config, UserManager<ApplicationUser> userManager, ApplicationDbContext context)
+    public TokenService(IConfiguration config, UserManager<ApplicationUser> userManager, ApplicationDbContext db)
     {
         _config = config;
         _userManager = userManager;
-        _context = context;
+        _db = db;
     }
 
     public string GenerateAccessToken(ApplicationUser user, IList<string> roles)
     {
         var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? ""),
-                new Claim(ClaimTypes.Name, user.UserName ?? "")
+                new(JwtRegisteredClaimNames.Sub, user.Id),
+                new(ClaimTypes.NameIdentifier, user.Id),
+                new(ClaimTypes.Name, user.UserName ?? ""),
+                new(JwtRegisteredClaimNames.Email, user.Email ?? "")
             };
+        foreach (var role in roles) claims.Add(new Claim(ClaimTypes.Role, role));
 
-        foreach (var role in roles)
-        {
-            claims.Add(new Claim(ClaimTypes.Role, role));
-        }
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
-            _config["Jwt:Issuer"],
-            _config["Jwt:Audience"],
-            claims,
+            issuer: _config["Jwt:Issuer"],
+            audience: _config["Jwt:Audience"],
+            claims: claims,
             expires: DateTime.UtcNow.AddMinutes(15),
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public async Task<string> GenerateRefreshTokenAsync(string userId)
+    public async Task<(string refreshToken, DateTime expiry)> GenerateRefreshTokenAsync(string userId, string? createdByIp = null)
     {
-        var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var expiry = DateTime.UtcNow.AddDays(7);
 
-        _context.RefreshTokens.Add(new RefreshToken
+        _db.RefreshTokens.Add(new RefreshToken
         {
             UserId = userId,
-            Token = refreshToken,
-            ExpiryDate = DateTime.UtcNow.AddDays(7)
+            Token = token,
+            ExpiryDate = expiry,
+            CreatedByIp = createdByIp ?? ""
         });
-
-        await _context.SaveChangesAsync();
-        return refreshToken;
+        await _db.SaveChangesAsync();
+        return (token, expiry);
     }
 
-    public async Task<bool> ValidateRefreshTokenAsync(string userId, string refreshToken)
+    public Task<bool> ValidateRefreshTokenAsync(string userId, string token)
     {
-        return await Task.FromResult(_context.RefreshTokens
-            .Any(r => r.UserId == userId && r.Token == refreshToken && r.ExpiryDate > DateTime.UtcNow));
+        var ok = _db.RefreshTokens.Any(r => r.UserId == userId && r.Token == token && r.IsActive);
+        return Task.FromResult(ok);
     }
 
-    public async Task<string> RotateRefreshTokenAsync(string userId, string refreshToken)
+    public async Task<string> RotateRefreshTokenAsync(string userId, string token, string? revokedByIp = null)
     {
-        var existing = _context.RefreshTokens
-            .FirstOrDefault(r => r.UserId == userId && r.Token == refreshToken);
+        var rec = _db.RefreshTokens.FirstOrDefault(r => r.UserId == userId && r.Token == token && r.IsActive);
+        if (rec is null) throw new SecurityTokenException("Invalid refresh token");
 
-        if (existing != null)
-        {
-            _context.RefreshTokens.Remove(existing);
-            return await GenerateRefreshTokenAsync(userId);
-        }
+        rec.RevokedAt = DateTime.UtcNow;
+        rec.RevokedByIp = revokedByIp;
 
-        throw new SecurityTokenException("Invalid refresh token");
+        var (newToken, _) = await GenerateRefreshTokenAsync(userId, revokedByIp);
+        rec.ReplacedByToken = newToken;
+
+        await _db.SaveChangesAsync();
+        return newToken;
     }
+}
 }

@@ -5,49 +5,29 @@ using System.Security.Claims;
 
 namespace Client.Auth
 {
-    public class MemoryTokenAuthStateProvider : AuthenticationStateProvider
+    public sealed class MemoryTokenAuthStateProvider(IAccessTokenStore store)
+        : AuthenticationStateProvider
     {
-        private readonly IAuthService _authService;
-        private readonly TokenProvider _tokenProvider;
+        private readonly IAccessTokenStore _store = store;
 
-        public MemoryTokenAuthStateProvider(IAuthService authService, TokenProvider tokenProvider)
+        public override Task<AuthenticationState> GetAuthenticationStateAsync()
         {
-            _authService = authService;
-            _tokenProvider = tokenProvider;
-        }
-
-        public override async Task<AuthenticationState> GetAuthenticationStateAsync()
-        {
-            // If token valid in memory, build principal
-            if (_tokenProvider.HasValidToken())
+            if (string.IsNullOrWhiteSpace(_store.AccessToken))
             {
-                var principal = BuildPrincipalFromToken(_tokenProvider.AccessToken!);
-                return new AuthenticationState(principal);
+                var anon = new ClaimsPrincipal(new ClaimsIdentity());
+                return Task.FromResult(new AuthenticationState(anon));
             }
-
-            // Try silent refresh (this will set token provider and notify)
-            var refreshed = await _authService.TrySilentRefreshAsync();
-            if (refreshed && _tokenProvider.HasValidToken())
+            // We trust the server-validated token. Optionally parse for roles/claims.
+            var identity = new ClaimsIdentity(new[]
             {
-                var principal = BuildPrincipalFromToken(_tokenProvider.AccessToken!);
-                return new AuthenticationState(principal);
-            }
+                new Claim(ClaimTypes.Name, "AuthenticatedUser")
+            }, authenticationType: "jwt");
 
-            // anonymous
-            return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
+            var user = new ClaimsPrincipal(identity);
+            return Task.FromResult(new AuthenticationState(user));
         }
 
-        public void NotifyAuthenticationStateChanged()
-        {
-            NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
-        }
-
-        private ClaimsPrincipal BuildPrincipalFromToken(string token)
-        {
-            var handler = new JwtSecurityTokenHandler();
-            var jwt = handler.ReadJwtToken(token);
-            var identity = new ClaimsIdentity(jwt.Claims, "jwt");
-            return new ClaimsPrincipal(identity);
-        }
+        // Allow AuthService to force a refresh when tokens change
+        public void NotifyAuthStateChanged() => NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
 }

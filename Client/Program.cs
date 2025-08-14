@@ -10,47 +10,31 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
-var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "https://localhost:5117/";
+var apiBaseUrl = new Uri(new Uri(builder.HostEnvironment.BaseAddress), builder.Configuration["apiBaseUrlUrl"] ?? "https://localhost:5117/");
 
-// Register TokenProvider (in-memory)
-builder.Services.AddSingleton<TokenProvider>(); // singleton ok for in-memory per-browser-tab
+// Named clients (optional but handy)
+builder.Services.AddHttpClient("auth", client => client.BaseAddress = apiBaseUrl);
+builder.Services.AddHttpClient("api", client => client.BaseAddress = apiBaseUrl);
 
-// Register auth services and interface (IAuthService)
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<AuthService>(); // concrete too if you need direct access
+// ===== Auth & state =====
+builder.Services.AddOptions();
+builder.Services.AddAuthorizationCore();
 
-// AuthenticationStateProvider uses the interface IAuthService (breaks circular deps)
+// Small, decoupled token store avoids circular DI
+builder.Services.AddScoped<IAccessTokenStore, MemoryAccessTokenStore>();
+
+// Auth state provider only reads from token store
 builder.Services.AddScoped<AuthenticationStateProvider, MemoryTokenAuthStateProvider>();
 
-// Menu service (uses ApiClient)
+// Services
+builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MenuService>();
 
-// AuthMessageHandler — attaches Bearer token to ApiClient requests and attempts refresh
-builder.Services.AddScoped<AuthMessageHandler>();
+// Message handler to attach bearer automatically
+builder.Services.AddTransient<AuthHeaderHandler>();
 
-// Named HttpClients:
-// NoAuthClient - for login/refresh/logout (server reads HttpOnly cookie)
-builder.Services.AddHttpClient("NoAuthClient", client => client.BaseAddress = new Uri(apiBaseUrl));
+// HttpClient that auto-sends access token (use when calling protected endpoints)
+builder.Services.AddHttpClient("authorized-api", client => client.BaseAddress = apiBaseUrl)
+    .AddHttpMessageHandler<AuthHeaderHandler>();
 
-// ApiClient - for all protected API calls, uses AuthMessageHandler
-builder.Services.AddHttpClient("ApiClient", client => client.BaseAddress = new Uri(apiBaseUrl))
-    .AddHttpMessageHandler<AuthMessageHandler>();
-
-builder.Services.AddAuthorizationCore();
-builder.Services.AddBlazoredToast();
-
-// Build host so we can do silent refresh before rendering UI
-var host = builder.Build();
-
-// Attempt silent refresh on startup to populate in-memory access token (if refresh cookie exists)
-try
-{
-    var auth = host.Services.GetRequiredService<IAuthService>();
-    await (auth as AuthService)!.TrySilentRefreshAsync(); // call concrete method to populate token
-}
-catch
-{
-    // failing silent refresh is okay — user will be anonymous
-}
-
-await host.RunAsync();
+await builder.Build().RunAsync();

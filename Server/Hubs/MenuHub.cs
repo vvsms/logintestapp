@@ -1,6 +1,10 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Server.Hubs
 {
-    public class MenuHub : Hub { }
+    [Authorize] // only authenticated clients
+    public class MenuHub : Hub
+    {
+    }
 }

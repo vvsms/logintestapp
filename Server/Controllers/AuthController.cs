@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Server.Configurations;
+using Server.Interfaces;
 using Server.Models;
 using Server.Services;
 using Shared.DTOs;
@@ -13,88 +14,101 @@ namespace Server.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
+    private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly UserManager<ApplicationUser> _userManager;
-    private readonly TokenService _tokenService;
-    private readonly JwtSettings _jwt;
+    private readonly ITokenService _tokenService;
+    private readonly IConfiguration _config;
 
-    public AuthController(UserManager<ApplicationUser> userManager, TokenService tokenService, IOptions<JwtSettings> jwtOpt)
+    public AuthController(SignInManager<ApplicationUser> signInManager,
+                          UserManager<ApplicationUser> userManager,
+                          ITokenService tokenService,
+                          IConfiguration config)
     {
+        _signInManager = signInManager;
         _userManager = userManager;
         _tokenService = tokenService;
-        _jwt = jwtOpt.Value;
+        _config = config;
     }
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest req)
+    public async Task<ActionResult<TokenResponse>> Login([FromBody] LoginRequest req)
     {
-        var user = await _userManager.FindByEmailAsync(req.Email);
-        if (user == null) return Unauthorized(new { message = "Invalid credentials." });
-        var ok = await _userManager.CheckPasswordAsync(user, req.Password);
-        if (!ok) return Unauthorized(new { message = "Invalid credentials." });
+        var user = await _userManager.FindByNameAsync(req.UserName);
+        if (user is null) return Unauthorized();
 
-        var createdByIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
-        var (accessToken, refreshToken, expiresAt) = await _tokenService.CreateTokensAsync(user, createdByIp);
-
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddDays(_jwt.RefreshTokenDays)
-        };
-        Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
+        var passOk = await _signInManager.CheckPasswordAsync(user, req.Password);
+        if (!passOk) return Unauthorized();
 
         var roles = await _userManager.GetRolesAsync(user);
-        return Ok(new AuthResponse(accessToken, expiresAt, roles.ToArray(), Array.Empty<string>()));
+        var access = _tokenService.GenerateAccessToken(user, roles);
+
+        // create refresh token and set cookie (HttpOnly, Secure, SameSite)
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var (refresh, expiry) = await _tokenService.GenerateRefreshTokenAsync(user.Id, ip);
+
+        SetRefreshCookie(refresh, expiry);
+        return new TokenResponse { AccessToken = access, ExpiresInMinutes = 15 };
     }
 
     [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh()
+    public async Task<ActionResult<TokenResponse>> Refresh()
     {
-        if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken)) return Unauthorized();
+        if (!Request.Cookies.TryGetValue("rt", out var refresh)) return Unauthorized();
 
-        var (user, tokenEntity) = await _tokenService.ValidateRefreshTokenAsync(refreshToken);
-        if (user == null || tokenEntity == null) return Unauthorized();
+        // The "sub" (user id) is stored in the old access token; since client may have none, we find by token
+        var rec = GetRefreshRecord(refresh);
+        if (rec is null || !rec.IsActive) return Unauthorized();
 
-        var createdByIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
-        var newRefreshToken = await _tokenService.RotateRefreshTokenAsync(tokenEntity, createdByIp);
+        var user = await _userManager.FindByIdAsync(rec.UserId);
+        if (user is null) return Unauthorized();
 
-        var (accessToken, _, expiresAt) = await _tokenService.CreateTokensAsync(user, createdByIp);
+        var valid = await _tokenService.ValidateRefreshTokenAsync(user.Id, refresh);
+        if (!valid) return Unauthorized();
 
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddDays(_jwt.RefreshTokenDays)
-        };
-        Response.Cookies.Append("refreshToken", newRefreshToken, cookieOptions);
-
+        // rotate
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var newRefresh = await _tokenService.RotateRefreshTokenAsync(user.Id, refresh, ip);
         var roles = await _userManager.GetRolesAsync(user);
-        return Ok(new AuthResponse(accessToken, expiresAt, roles.ToArray(), Array.Empty<string>()));
+        var newAccess = _tokenService.GenerateAccessToken(user, roles);
+
+        SetRefreshCookie(newRefresh, DateTime.UtcNow.AddDays(7));
+        return new TokenResponse { AccessToken = newAccess, ExpiresInMinutes = 15 };
     }
 
     [Authorize]
     [HttpPost("logout")]
-    public async Task<IActionResult> Logout()
+    public IActionResult Logout()
     {
-        var userId = User.FindFirst("uid")?.Value;
-        if (!string.IsNullOrEmpty(userId)) await _tokenService.RevokeAllRefreshTokensForUserAsync(userId);
-        Response.Cookies.Delete("refreshToken");
+        if (Request.Cookies.ContainsKey("rt"))
+        {
+            Response.Cookies.Append("rt", "", new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Strict,
+                Expires = DateTimeOffset.UnixEpoch
+            });
+        }
         return Ok();
     }
 
-    [HttpGet("me/policies")]
-    [Authorize]
-    public async Task<IActionResult> GetPolicies([FromServices] IAuthorizationService authz)
+    private RefreshToken? GetRefreshRecord(string token)
     {
-        var policies = new[] { "CanManageMenus", "CanViewReports" };
-        var satisfied = new List<string>();
-        foreach (var p in policies)
-        {
-            var res = await authz.AuthorizeAsync(User, p);
-            if (res.Succeeded) satisfied.Add(p);
-        }
-        return Ok(satisfied);
+        // If you use EF, inject ApplicationDbContext and query it here.
+        // Example (pseudo):
+        // return _db.RefreshTokens.FirstOrDefault(r => r.Token == token);
+        return null;
     }
+
+    private void SetRefreshCookie(string token, DateTime expiry)
+    {
+        Response.Cookies.Append("rt", token, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Strict,
+            Expires = new DateTimeOffset(expiry)
+        });
+    }
+}
 }
