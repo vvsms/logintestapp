@@ -1,9 +1,9 @@
 ﻿@page "/auth/register"
 @inject AuthService Auth
 @inject NavigationManager Nav
+@inject ClientApp.State.AuthStateProvider AuthProvider
 
 <h3>Register</h3>
-
 <input @bind="FullName" placeholder="Full name" />
 <input @bind="Email" placeholder="Email" />
 <input @bind="Password" placeholder="Password" type="password" />
@@ -17,6 +17,6 @@
     async Task DoRegister()
     {
         var ok = await Auth.RegisterAsync(new SharedDtos.RegisterRequest { FullName = FullName, Email = Email, Password = Password });
-        if (ok) Nav.NavigateTo("/");
+        if (ok) { AuthProvider.NotifyChanged(); Nav.NavigateTo("/"); }
     }
 }

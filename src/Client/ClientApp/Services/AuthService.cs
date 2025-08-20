@@ -1,4 +1,3 @@
-using Blazored.LocalStorage;
 using ClientApp.State;
 using SharedDtos;
 using System.Net.Http.Json;
@@ -7,54 +6,42 @@ namespace ClientApp.Services;
 
 public class AuthService
 {
-    private readonly HttpClient _http;
-    private readonly AuthStateProvider _auth;
-    private readonly ILocalStorageService _storage;
+    private readonly HttpClient _http;       // goes through AuthMessageHandler
+    private readonly HttpClient _raw;        // sends cookies, no bearer (for refresh/login/register)
+    private readonly TokenState _token;
 
-    private const string AccessKey = "access_token";
-    private const string RefreshKey = "refresh_token";
-
-    public AuthService(HttpClient http, AuthStateProvider auth, ILocalStorageService storage)
-    { _http = http; _auth = auth; _storage = storage; }
+    public AuthService(IHttpClientFactory factory, TokenState token)
+    {
+        _http = factory.CreateClient("Api");      // authenticated pipeline
+        _raw = factory.CreateClient("ApiRaw");   // raw pipeline (cookies)
+        _token = token;
+    }
 
     public async Task<bool> RegisterAsync(RegisterRequest req)
     {
-        var res = await _http.PostAsJsonAsync("api/auth/register", req);
+        var res = await _raw.PostAsJsonAsync("api/auth/register", req);
         if (!res.IsSuccessStatusCode) return false;
-
         var data = await res.Content.ReadFromJsonAsync<AuthResponse>();
-        await ApplyAuthAsync(data!);
+        if (data == null) return false;
+        _token.Set(data.AccessToken, data.ExpiresAtUtc);
         return true;
     }
 
     public async Task<bool> LoginAsync(LoginRequest req)
     {
-        var res = await _http.PostAsJsonAsync("api/auth/login", req);
+        var res = await _raw.PostAsJsonAsync("api/auth/login", req);
         if (!res.IsSuccessStatusCode) return false;
         var data = await res.Content.ReadFromJsonAsync<AuthResponse>();
-        await ApplyAuthAsync(data!);
+        if (data == null) return false;
+        _token.Set(data.AccessToken, data.ExpiresAtUtc);
         return true;
     }
 
-    public async Task LogoutAsync() => await _auth.SetUserAsync(null, null, Array.Empty<string>());
-
-    public async Task<AuthResponse?> RefreshAsync()
+    public async Task LogoutAsync()
     {
-        var refresh = await _storage.GetItemAsStringAsync(RefreshKey);
-        if (string.IsNullOrWhiteSpace(refresh)) return null;
-        var res = await _http.PostAsJsonAsync("api/auth/refresh", new RefreshRequest { RefreshToken = refresh });
-        if (!res.IsSuccessStatusCode) return null;
-        var data = await res.Content.ReadFromJsonAsync<AuthResponse>();
-        await ApplyAuthAsync(data!);
-        return data;
+        await _raw.PostAsync("api/auth/logout", null);
+        _token.Clear();
     }
 
-    private async Task ApplyAuthAsync(AuthResponse data)
-    {
-        await _storage.SetItemAsStringAsync(AccessKey, data.AccessToken);
-        await _storage.SetItemAsStringAsync(RefreshKey, data.RefreshToken);
-        await _auth.SetUserAsync(data.AccessToken, data.Email, data.Roles);
-        _http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", data.AccessToken);
-    }
+    public HttpClient Http => _http; // expose authenticated client for other services
 }

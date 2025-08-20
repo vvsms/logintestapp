@@ -1,5 +1,4 @@
-using Blazored.LocalStorage;
-using ClientApp;
+﻿using ClientApp;
 using ClientApp.Services;
 using ClientApp.State;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -10,16 +9,30 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
-//builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-
 var apiBase = builder.Configuration["ApiBase"] ?? "http://localhost:5096";
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBase) });
-builder.Services.AddBlazoredLocalStorage();
-
-builder.Services.AddAuthorizationCore();
+// Token state + auth state provider
+builder.Services.AddSingleton<TokenState>();
 builder.Services.AddScoped<AuthStateProvider>();
+builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<AuthStateProvider>());
+
+// Handlers
+builder.Services.AddTransient<AuthMessageHandler>();
+
+// Raw client (sends cookies, no bearer)
+builder.Services.AddHttpClient("ApiRaw", client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
+// Authenticated client (Bearer + cookies)
+builder.Services.AddHttpClient("Api", client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+}).AddHttpMessageHandler<AuthMessageHandler>();
+
+// High-level services
 builder.Services.AddScoped<AuthService>();
 
 await builder.Build().RunAsync();

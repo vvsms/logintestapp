@@ -1,5 +1,5 @@
 @page "/account/profile"
-@inject HttpClient Http
+@inject AuthService Auth
 
 <h3>Profile</h3>
 
@@ -20,7 +20,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        try { _me = await Http.GetFromJsonAsync<MeDto>("api/auth/me"); }
+        try { _me = await Auth.Http.GetFromJsonAsync<MeDto>("api/auth/me"); }
         catch { _me = new MeDto { Email = "Unauthorized", FullName = "-", Roles = [] }; }
     }
 }

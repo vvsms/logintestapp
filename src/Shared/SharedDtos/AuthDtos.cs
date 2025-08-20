@@ -22,15 +22,9 @@ namespace SharedDtos
     public sealed class AuthResponse
     {
         public string AccessToken { get; set; } = default!;
-        public string RefreshToken { get; set; } = default!;
         public DateTime ExpiresAtUtc { get; set; }
         public string? Email { get; set; }
         public string? FullName { get; set; }
         public IEnumerable<string> Roles { get; set; } = Array.Empty<string>();
-    }
-
-    public sealed class RefreshRequest
-    {
-        public string RefreshToken { get; set; } = default!;
     }
 }

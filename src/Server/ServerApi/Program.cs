@@ -29,29 +29,35 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(opt =>
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
 
-// JWT
+// Configure Identity cookie (without re-adding scheme)
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.SlidingExpiration = true;
+});
+
+// JWT still available for APIs/mobile apps
 builder.Services.Configure<JwtOptions>(cfg.GetSection("Jwt"));
 var jwtKey = Encoding.UTF8.GetBytes(cfg["Jwt:Key"]!);
-builder.Services.AddAuthentication(o =>
-{
-    o.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    o.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(o =>
-{
-    o.RequireHttpsMetadata = false;
-    o.SaveToken = true;
-    o.TokenValidationParameters = new()
+
+builder.Services.AddAuthentication() // no need to set Default scheme, Identity already does it
+    .AddJwtBearer(o =>
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = cfg["Jwt:Issuer"],
-        ValidAudience = cfg["Jwt:Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(jwtKey),
-        ClockSkew = TimeSpan.Zero
-    };
-});
+        o.RequireHttpsMetadata = false;
+        o.SaveToken = true;
+        o.TokenValidationParameters = new()
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = cfg["Jwt:Issuer"],
+            ValidAudience = cfg["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(jwtKey),
+            ClockSkew = TimeSpan.Zero
+        };
+    });
 
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
@@ -65,7 +71,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 builder.Services.AddAutoMapper(typeof(ApiMappingProfile));
 
 // CORS
-var allowedOrigins = cfg.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 builder.Services.AddCors(opt =>
 {
     opt.AddPolicy("wasm", p => p

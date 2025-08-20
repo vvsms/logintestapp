@@ -1,11 +1,14 @@
 @page "/auth/login"
-
 @inject AuthService Auth
 @inject NavigationManager Nav
+@inject ClientApp.State.AuthStateProvider AuthProvider
+@inject ClientApp.State.TokenState Token
 
 <h3>Login</h3>
-
-@if (!string.IsNullOrWhiteSpace(Error)) { <p>@Error</p> }
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+    <p>@Error</p>
+}
 
 <input @bind="Email" placeholder="Email" />
 <input @bind="Password" placeholder="Password" type="password" />
@@ -19,7 +22,11 @@
     async Task DoLogin()
     {
         var ok = await Auth.LoginAsync(new SharedDtos.LoginRequest { Email = Email, Password = Password });
-        if (ok) Nav.NavigateTo("/");
+        if (ok)
+        {
+            AuthProvider.NotifyChanged();
+            Nav.NavigateTo("/");
+        }
         else Error = "Invalid credentials";
     }
 }
