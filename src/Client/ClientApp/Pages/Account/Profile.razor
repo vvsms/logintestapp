@@ -1,0 +1,26 @@
+@page "/account/profile"
+@inject HttpClient Http
+
+<h3>Profile</h3>
+
+@if (_me == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <p>Email: @_me.Email</p>
+    <p>Name: @_me.FullName</p>
+    <p>Roles: @string.Join(", ", _me.Roles)</p>
+}
+
+@code {
+    class MeDto { public string? Email { get; set; } public string? FullName { get; set; } public string[] Roles { get; set; } = []; }
+    MeDto? _me;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _me = await Http.GetFromJsonAsync<MeDto>("api/auth/me"); }
+        catch { _me = new MeDto { Email = "Unauthorized", FullName = "-", Roles = [] }; }
+    }
+}

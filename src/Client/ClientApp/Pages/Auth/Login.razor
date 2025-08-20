@@ -1,0 +1,25 @@
+@page "/auth/login"
+
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<h3>Login</h3>
+
+@if (!string.IsNullOrWhiteSpace(Error)) { <p>@Error</p> }
+
+<input @bind="Email" placeholder="Email" />
+<input @bind="Password" placeholder="Password" type="password" />
+<button @onclick="DoLogin">Login</button>
+
+@code {
+    string Email = "";
+    string Password = "";
+    string? Error;
+
+    async Task DoLogin()
+    {
+        var ok = await Auth.LoginAsync(new SharedDtos.LoginRequest { Email = Email, Password = Password });
+        if (ok) Nav.NavigateTo("/");
+        else Error = "Invalid credentials";
+    }
+}

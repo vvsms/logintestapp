@@ -1,0 +1,22 @@
+﻿@page "/auth/register"
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<h3>Register</h3>
+
+<input @bind="FullName" placeholder="Full name" />
+<input @bind="Email" placeholder="Email" />
+<input @bind="Password" placeholder="Password" type="password" />
+<button @onclick="DoRegister">Register</button>
+
+@code {
+    string FullName = "";
+    string Email = "";
+    string Password = "";
+
+    async Task DoRegister()
+    {
+        var ok = await Auth.RegisterAsync(new SharedDtos.RegisterRequest { FullName = FullName, Email = Email, Password = Password });
+        if (ok) Nav.NavigateTo("/");
+    }
+}
