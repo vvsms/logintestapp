@@ -1,12 +1,12 @@
-﻿<CascadingAuthenticationState>
+﻿<Microsoft.AspNetCore.Components.Authorization.CascadingAuthenticationState>
     <Router AppAssembly="@typeof(App).Assembly">
         <Found Context="routeData">
             <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
             <FocusOnNavigate RouteData="@routeData" Selector="h1" />
         </Found>
         <NotFound>
-           <Pages.SharedPages.NotFound />
+           <ClientApp.Pages.SharedPages.NotFound />
         </NotFound>
     </Router>
 
-</CascadingAuthenticationState>
+</Microsoft.AspNetCore.Components.Authorization.CascadingAuthenticationState>

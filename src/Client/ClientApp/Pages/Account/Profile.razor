@@ -1,26 +1,31 @@
-@page "/account/profile"
-@inject AuthService Auth
+@page "/profile"
+@inject ClientApp.Services.AuthService Auth
 
 <h3>Profile</h3>
 
-@if (_me == null)
+@if (_profile == null)
 {
-    <p>Loading...</p>
+    <p><em>Loading...</em></p>
 }
 else
 {
-    <p>Email: @_me.Email</p>
-    <p>Name: @_me.FullName</p>
-    <p>Roles: @string.Join(", ", _me.Roles)</p>
+    <p><strong>Email:</strong> @_profile.Email</p>
+    <p><strong>Name:</strong> @_profile.FullName</p>
+    <p><strong>Roles:</strong> @string.Join(", ", _profile.Roles)</p>
+    <button @onclick="Logout">Logout</button>
 }
 
 @code {
-    class MeDto { public string? Email { get; set; } public string? FullName { get; set; } public string[] Roles { get; set; } = []; }
-    MeDto? _me;
+    private ClientApp.Services.UserProfile? _profile;
 
     protected override async Task OnInitializedAsync()
     {
-        try { _me = await Auth.Http.GetFromJsonAsync<MeDto>("api/auth/me"); }
-        catch { _me = new MeDto { Email = "Unauthorized", FullName = "-", Roles = [] }; }
+        _profile = await Auth.GetProfileAsync();
+    }
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        _profile = null;
     }
 }

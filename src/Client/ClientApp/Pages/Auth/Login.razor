@@ -1,32 +1,45 @@
 @page "/auth/login"
 @inject AuthService Auth
 @inject NavigationManager Nav
-@inject ClientApp.State.AuthStateProvider AuthProvider
-@inject ClientApp.State.TokenState Token
 
 <h3>Login</h3>
-@if (!string.IsNullOrWhiteSpace(Error))
+
+@if (!string.IsNullOrEmpty(ErrorMessage))
 {
-    <p>@Error</p>
+    <p style="color:red">@ErrorMessage</p>
 }
 
-<input @bind="Email" placeholder="Email" />
-<input @bind="Password" placeholder="Password" type="password" />
-<button @onclick="DoLogin">Login</button>
+<EditForm Model="_model" OnValidSubmit="HandleLogin">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div>
+        <label>Email</label>
+        <InputText @bind-Value="_model.Email" />
+    </div>
+    <div>
+        <label>Password</label>
+        <input type="password" @bind="_model.Password" />
+    </div>
+
+    <button type="submit">Login</button>
+</EditForm>
 
 @code {
-    string Email = "";
-    string Password = "";
-    string? Error;
+    private SharedDtos.LoginRequest _model = new();
+    private string ErrorMessage = "";
 
-    async Task DoLogin()
+    private async Task HandleLogin()
     {
-        var ok = await Auth.LoginAsync(new SharedDtos.LoginRequest { Email = Email, Password = Password });
+        var ok = await Auth.LoginAsync(_model);
         if (ok)
         {
-            AuthProvider.NotifyChanged();
-            Nav.NavigateTo("/");
+            // AuthStateProvider auto-updates via TokenState.
+            Nav.NavigateTo("/profile");
         }
-        else Error = "Invalid credentials";
+        else
+        {
+            ErrorMessage = "Invalid login attempt";
+        }
     }
 }

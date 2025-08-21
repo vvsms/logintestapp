@@ -2,21 +2,28 @@
 {
     public class TokenState
     {
-        public string? AccessToken { get; private set; }
-        public DateTime ExpiresAtUtc { get; private set; }
+        public string? Email { get; private set; }
+        public string? FullName { get; private set; }
+        public string[] Roles { get; private set; } = [];
 
-        public bool IsExpiredSoon(TimeSpan margin) => DateTime.UtcNow >= ExpiresAtUtc - margin;
+        public bool IsAuthenticated => !string.IsNullOrEmpty(Email);
 
-        public void Set(string token, DateTime expiresAtUtc)
+        public event Action? Changed;
+
+        public void SetUser(string email, string fullName, string[] roles)
         {
-            AccessToken = token;
-            ExpiresAtUtc = expiresAtUtc;
+            Email = email;
+            FullName = fullName;
+            Roles = roles ?? [];
+            Changed?.Invoke();
         }
 
         public void Clear()
         {
-            AccessToken = null;
-            ExpiresAtUtc = DateTime.MinValue;
+            Email = null;
+            FullName = null;
+            Roles = [];
+            Changed?.Invoke();
         }
     }
 }

@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -47,26 +47,29 @@ public class AuthController : ControllerBase
             await _roles.CreateAsync(new IdentityRole("User"));
         await _users.AddToRoleAsync(user, "User");
 
-        var (access, exp) = await _jwt.CreateAccessTokenAsync(user);
-        var (refresh, refreshExp) = _jwt.CreateRefreshToken();
+        // default: Blazor cookie login
+        await _signIn.SignInAsync(user, isPersistent: true);
 
-        _db.RefreshTokens.Add(new UserRefreshToken { Token = refresh, UserId = user.Id, ExpiresAtUtc = refreshExp });
-        await _db.SaveChangesAsync();
-
-        SetRefreshCookie(refresh, refreshExp);
-
-        var roles = await _users.GetRolesAsync(user);
-        return new AuthResponse { AccessToken = access, ExpiresAtUtc = exp, Email = user.Email, FullName = user.FullName, Roles = roles };
+        return Ok(new { message = "User registered and logged in" });
     }
 
     [HttpPost("login")]
-    public async Task<ActionResult<AuthResponse>> Login(LoginRequest req)
+    public async Task<IActionResult> Login(LoginRequest req, [FromQuery] bool useJwt = false)
     {
         var user = await _users.FindByEmailAsync(req.Email);
         if (user == null) return Unauthorized("Invalid credentials");
+
         var passOk = await _signIn.CheckPasswordSignInAsync(user, req.Password, false);
         if (!passOk.Succeeded) return Unauthorized("Invalid credentials");
 
+        // Mode 1: Blazor WASM (cookie login)
+        if (!useJwt)
+        {
+            await _signIn.SignInAsync(user, isPersistent: true);
+            return Ok(new { message = "Login successful (cookie mode)" });
+        }
+
+        // Mode 2: Mobile app (JWT + refresh token)
         var (access, exp) = await _jwt.CreateAccessTokenAsync(user);
         var (refresh, refreshExp) = _jwt.CreateRefreshToken();
 
@@ -76,31 +79,7 @@ public class AuthController : ControllerBase
         SetRefreshCookie(refresh, refreshExp);
 
         var roles = await _users.GetRolesAsync(user);
-        return new AuthResponse { AccessToken = access, ExpiresAtUtc = exp, Email = user.Email, FullName = user.FullName, Roles = roles };
-    }
-
-    // No body: refresh token comes from HttpOnly cookie
-    [HttpPost("refresh")]
-    public async Task<ActionResult<AuthResponse>> Refresh()
-    {
-        if (!Request.Cookies.TryGetValue(RefreshCookieName, out var cookieToken) || string.IsNullOrWhiteSpace(cookieToken))
-            return Unauthorized("No refresh token");
-
-        var rt = await _db.RefreshTokens.Include(x => x.User).SingleOrDefaultAsync(x => x.Token == cookieToken);
-        if (rt == null || rt.Revoked || rt.ExpiresAtUtc < DateTime.UtcNow) return Unauthorized("Invalid refresh token");
-
-        // rotate
-        rt.Revoked = true;
-        var (newRefresh, newExp) = _jwt.CreateRefreshToken();
-        _db.RefreshTokens.Add(new UserRefreshToken { Token = newRefresh, UserId = rt.UserId, ExpiresAtUtc = newExp });
-
-        var (access, accessExp) = await _jwt.CreateAccessTokenAsync(rt.User);
-        await _db.SaveChangesAsync();
-
-        SetRefreshCookie(newRefresh, newExp);
-
-        var roles = await _users.GetRolesAsync(rt.User);
-        return new AuthResponse { AccessToken = access, ExpiresAtUtc = accessExp, Email = rt.User.Email, FullName = rt.User.FullName, Roles = roles };
+        return Ok(new AuthResponse { AccessToken = access, ExpiresAtUtc = exp, Email = user.Email, FullName = user.FullName, Roles = roles });
     }
 
     [Authorize]
@@ -114,21 +93,21 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("logout")]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout()
     {
-        // Clear cookie (best-effort; also consider revoking all refresh tokens for user if authenticated)
+        await _signIn.SignOutAsync();
         Response.Cookies.Delete(RefreshCookieName, new CookieOptions { Path = "/", SameSite = SameSiteMode.None, Secure = true, HttpOnly = true });
-        return Ok();
+        return Ok(new { message = "Logged out" });
     }
 
+    // helper
     private void SetRefreshCookie(string token, DateTime expiresUtc)
     {
-        // If API and WASM are on different origins in dev, we must use SameSite=None; Secure=true
         Response.Cookies.Append(RefreshCookieName, token, new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,                  // requires HTTPS
-            SameSite = SameSiteMode.None,   // allows cross-site cookie for SPA on different origin
+            Secure = true,
+            SameSite = SameSiteMode.None,
             Expires = new DateTimeOffset(expiresUtc),
             Path = "/"
         });

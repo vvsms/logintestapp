@@ -6,30 +6,50 @@ namespace ClientApp.State;
 
 public class AuthStateProvider : AuthenticationStateProvider
 {
-    private readonly TokenState _token;
+    private readonly Services.AuthService _auth;
+    private readonly TokenState _state;
+    private bool _initialized;
 
-    public AuthStateProvider(TokenState token) => _token = token;
-
-    public override Task<AuthenticationState> GetAuthenticationStateAsync()
+    public AuthStateProvider(Services.AuthService auth, TokenState state)
     {
-        if (string.IsNullOrWhiteSpace(_token.AccessToken))
-            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
+        _auth = auth;
+        _state = state;
 
-        var handler = new JwtSecurityTokenHandler();
-        ClaimsIdentity identity;
+        // When TokenState changes (login/logout), notify Blazor.
+        _state.Changed += () => NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
+    }
 
-        try
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    {
+        // On first use, try to fetch profile from API (cookie will be sent automatically).
+        if (!_initialized)
         {
-            var jwt = handler.ReadJwtToken(_token.AccessToken);
-            identity = new ClaimsIdentity(jwt.Claims, "jwt");
+            var p = await _auth.GetProfileAsync();
+            if (p != null)
+            {
+                _state.SetUser(p.Email, p.FullName, p.Roles);
+            }
+            _initialized = true;
         }
-        catch
+
+        ClaimsIdentity identity;
+        if (_state.IsAuthenticated)
+        {
+            var claims = new List<Claim>
+                {
+                    new Claim(ClaimTypes.Name, _state.Email!),
+                    new Claim("fullName", _state.FullName ?? _state.Email!)
+                };
+            foreach (var r in _state.Roles)
+                claims.Add(new Claim(ClaimTypes.Role, r));
+
+            identity = new ClaimsIdentity(claims, authenticationType: "Cookies");
+        }
+        else
         {
             identity = new ClaimsIdentity();
         }
 
-        return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
+        return new AuthenticationState(new ClaimsPrincipal(identity));
     }
-
-    public void NotifyChanged() => NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
 }
